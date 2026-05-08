@@ -1,84 +1,95 @@
 import csv
 import re
-from pprint import pprint
 
-def normalize_name(contact):
-    full_name_tokens = " ".join(contact[:3]).strip().split()
-    lastname  = full_name_tokens[0] if len(full_name_tokens) > 0 else ""
-    firstname = full_name_tokens[1] if len(full_name_tokens) > 1 else ""
-    surname   = full_name_tokens[2] if len(full_name_tokens) > 2 else ""
-    rest = contact[3:] if len(contact) > 3 else []
-    while len(rest) < 4:
-        rest.append("")
-    return [lastname, firstname, surname] + rest[:4]
+def normalize_name(parts):
+    """
+    parts – список из первых трёх полей (lastname, firstname, surname)
+    Возвращает кортеж (lastname, firstname, surname)
+    """
+    # Склеиваем все три поля через пробел и разбиваем
+    full = ' '.join(parts).strip().split()
+    lastname = full[0] if len(full) > 0 else ''
+    firstname = full[1] if len(full) > 1 else ''
+    surname = full[2] if len(full) > 2 else ''
+    return lastname, firstname, surname
 
 def normalize_phone(phone):
     if not phone:
-        return ""
+        return ''
     phone = phone.strip()
-    ext_match = re.search(r'(доб\.?\s*)(\d+)', phone, re.IGNORECASE)
-    ext = ""
-    if ext_match:
-        ext = " доб." + ext_match.group(2)
+    # Добавочный номер
+    ext = ''
+    match = re.search(r'(доб\.?\s*)(\d+)', phone, re.IGNORECASE)
+    if match:
+        ext = ' доб.' + match.group(2)
         phone = re.sub(r'доб\.?\s*\d+', '', phone, flags=re.IGNORECASE)
+    # Оставляем только цифры
     digits = re.sub(r'\D', '', phone)
+    # Форматируем
     if len(digits) == 11 and digits[0] in ('7', '8'):
         digits = digits[1:]
-        number = f"+7({digits[0:3]}){digits[3:6]}-{digits[6:8]}-{digits[8:10]}"
+        number = f'+7({digits[0:3]}){digits[3:6]}-{digits[6:8]}-{digits[8:10]}'
     elif len(digits) == 10:
-        number = f"+7({digits[0:3]}){digits[3:6]}-{digits[6:8]}-{digits[8:10]}"
+        number = f'+7({digits[0:3]}){digits[3:6]}-{digits[6:8]}-{digits[8:10]}'
     else:
-        number = phone
+        number = phone  # нераспознанный формат оставляем как есть
     return number + ext
 
-# Чтение
-with open("phonebook_raw.csv", encoding="utf-8") as f:
-    rows = csv.reader(f, delimiter=",")
-    contacts_list = list(rows)
+# Чтение исходного файла
+with open('phonebook_raw.csv', encoding='utf-8') as f:
+    reader = csv.reader(f, delimiter=',')
+    contacts_list = list(reader)
 
-pprint(contacts_list)
-
-# Заголовок
+# Отделяем заголовок (если есть)
 header = []
 if contacts_list and contacts_list[0][0].lower() == 'lastname':
     header = contacts_list[0]
-    data_rows = contacts_list[1:]
+    data = contacts_list[1:]
 else:
-    data_rows = contacts_list
+    data = contacts_list
 
-# Нормализация
+# Обрабатываем каждую строку
 normalized = []
-for row in data_rows:
+for row in data:
+    # Дополняем до 7 полей
     while len(row) < 7:
-        row.append("")
-    row = normalize_name(row)
+        row.append('')
+    # Пропускаем строки, где все три первых поля пусты
+    if all(not cell.strip() for cell in row[:3]):
+        continue
+
+    # Нормализуем ФИО
+    last, first, sur = normalize_name(row[:3])
+    row[0], row[1], row[2] = last, first, sur
+
+    # Нормализуем телефон
     row[5] = normalize_phone(row[5])
+
     normalized.append(row)
 
-# Объединение дублей по ФАМИЛИИ, ИМЕНИ, ОТЧЕСТВУ (три поля)
+# Объединение дублей по ФАМИЛИИ, ИМЕНИ, ОТЧЕСТВУ (все три)
 unique = {}
 for row in normalized:
-    # ключ – кортеж из трёх строк (lastname, firstname, surname)
     key = (row[0].lower(), row[1].lower(), row[2].lower())
     if key not in unique:
-        unique[key] = row[:]
+        unique[key] = row[:]        # сохраняем копию
     else:
         existing = unique[key]
-        # Объединяем поля: organization, position, phone, email (индексы 3..6)
+        # Заполняем недостающие данные (индексы 3..6)
         for i in range(3, 7):
             if not existing[i] and row[i]:
                 existing[i] = row[i]
 
-# Результат с заголовком
+# Формируем результат (заголовок + данные)
 result = []
 if header:
     result.append(header)
 result.extend(unique.values())
 
-# Сохранение
-with open("phonebook.csv", "w", encoding="utf-8", newline="") as f:
+# Запись в файл (без пустых строк в конце)
+with open('phonebook.csv', 'w', encoding='utf-8', newline='') as f:
     writer = csv.writer(f, delimiter=',')
     writer.writerows(result)
 
-print("Готово. Результат в phonebook.csv")
-pprint(result)
+print(f'Обработано записей: {len(normalized)}')
+print(f'Уникальных контактов: {len(unique)}')
